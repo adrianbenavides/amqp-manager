@@ -1,5 +1,4 @@
 #![forbid(unsafe_code)]
-
 //! [Lapin](https://github.com/CleverCloud/lapin) wrapper that encapsulates the connections/channels
 //! handling making it easier to use and less error prone.
 //!
@@ -8,14 +7,15 @@
 //! use amqp_manager::prelude::*;
 //! use futures::FutureExt;
 //! use tokio_amqp::LapinTokioExt;
+//! use serde::{Deserialize, Serialize};
+//!
+//! #[derive(Deserialize, Serialize)]
+//! struct SimpleDelivery(String);
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let pool_manager = LapinConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//", &ConnectionProperties::default().with_tokio());
-//!     let pool = r2d2::Pool::builder()
-//!         .max_size(2)
-//!         .build(pool_manager)
-//!         .expect("Should build amqp connection pool");
+//!     let pool_manager = RMQConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
+//!     let pool = mobc::Pool::builder().build(pool_manager);
 //!     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
 //!     let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
 //!
@@ -31,16 +31,16 @@
 //!     amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
 //!
 //!     amqp_session
-//!         .publish_to_queue(PublishToQueue {
-//!             queue_name: queue_name.to_string(),
-//!             payload: Bytes::from_static(b"Hello world!"),
+//!         .publish_to_routing_key(PublishToRoutingKey {
+//!             routing_key: queue_name.to_string(),
+//!             payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
 //!             ..Default::default()
 //!         })
 //!         .await
 //!         .expect("publish_to_queue");
 //!
 //!     amqp_session
-//!         .create_consumer(
+//!         .create_consumer_with_delegate(
 //!             CreateConsumer {
 //!                 queue_name: queue_name.to_string(),
 //!                 consumer_name: "consumer-name".to_string(),
@@ -67,10 +67,11 @@ use lapin::message::Delivery;
 use lapin::options::{BasicNackOptions, ConfirmSelectOptions};
 use lapin::protocol::{AMQPError, AMQPErrorKind, AMQPHardError};
 use lapin::types::{LongString, ShortString};
-use r2d2_lapin::prelude::*;
+use mobc_lapin::*;
 
 use crate::prelude::{AMQPValue, FieldTable};
 use crate::session::AmqpSession;
+use lapin::Channel;
 
 pub mod prelude;
 
@@ -112,28 +113,35 @@ impl AmqpConsumerError {
 }
 
 /// The struct that handles the connection pool.
-#[derive(Debug)]
 pub struct AmqpManager {
-    conn_pool: r2d2::Pool<LapinConnectionManager>,
+    conn_pool: mobc::Pool<mobc_lapin::RMQConnectionManager>,
 }
 
 impl AmqpManager {
-    pub fn new(conn_pool: r2d2::Pool<LapinConnectionManager>) -> AmqpResult<Self> {
+    pub fn new(conn_pool: mobc::Pool<mobc_lapin::RMQConnectionManager>) -> AmqpResult<Self> {
         Ok(Self { conn_pool })
     }
 
     /// Gets a new connection from the connection pool and creates a new channel.
     /// Both the connection and the channel will be closed when dropping the `AmqpSession` instance.
     pub async fn get_session(&self) -> AmqpResult<AmqpSession> {
-        let conn = self.conn_pool.get().map_err(|e| {
+        Ok(AmqpSession::new(self.get_channel().await?))
+    }
+
+    pub async fn get_session_with_confirm_select(&self) -> AmqpResult<AmqpSession> {
+        let channel = self.get_channel().await?;
+        channel.confirm_select(ConfirmSelectOptions::default()).await?;
+        Ok(AmqpSession::new(channel))
+    }
+
+    async fn get_channel(&self) -> AmqpResult<Channel> {
+        let conn = self.conn_pool.get().await.map_err(|e| {
             lapin::Error::ProtocolError(AMQPError::new(
                 AMQPErrorKind::Hard(AMQPHardError::CONNECTIONFORCED),
                 ShortString::from(e.to_string()),
             ))
         })?;
-        let channel = conn.create_channel().await?;
-        channel.confirm_select(ConfirmSelectOptions::default()).await?;
-        Ok(AmqpSession::new(channel))
+        conn.create_channel().await
     }
 
     /// Helper method to create a `FieldTable` instance with the dead-letter argument.
@@ -146,24 +154,9 @@ impl AmqpManager {
         args
     }
 
-    /// Helper method to deserialize the `Delivery` contents into a `T` struct.
-    pub fn deserialize_delivery<T: serde::de::DeserializeOwned>(delivery: &Delivery) -> AmqpConsumerResult<T> {
-        let as_string = Self::delivery_to_string(&delivery.data)?;
-        Self::deserialize_data(&as_string)
-    }
-
-    fn delivery_to_string(delivery_data: &[u8]) -> AmqpConsumerResult<String> {
-        match String::from_utf8(delivery_data.to_vec()) {
-            Ok(x) => Ok(x),
-            Err(_) => {
-                let msg = "Failed parsing delivery data".to_string();
-                Err(AmqpConsumerError::UnrecoverableError(msg))
-            }
-        }
-    }
-
-    fn deserialize_data<T: serde::de::DeserializeOwned>(data: &str) -> AmqpConsumerResult<T> {
-        match serde_json::from_str(data) {
+    /// Helper method to deserialize the `Delivery` contents into a `T` struct that was previously serialized as a json.
+    pub fn deserialize_json_delivery<'de, T: serde::de::Deserialize<'de>>(delivery: &'de Delivery) -> AmqpConsumerResult<T> {
+        match serde_json::from_slice(&delivery.data) {
             Ok(x) => Ok(x),
             Err(_) => {
                 let msg = "Failed deserializing delivery data into struct".to_string();

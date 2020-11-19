@@ -22,7 +22,7 @@ impl AmqpSession {
 
     pub async fn publish_to_exchange(&self, op: PublishToExchange) -> AmqpResult<Confirmation> {
         self.channel
-            .basic_publish(&op.exchange_name, "", op.options, op.payload.to_vec(), op.properties)
+            .basic_publish(&op.exchange_name, "", op.options, op.payload.contents().to_vec(), op.properties)
             .await?
             .await
     }
@@ -44,9 +44,9 @@ impl AmqpSession {
             .await
     }
 
-    pub async fn publish_to_queue(&self, op: PublishToQueue) -> AmqpResult<Confirmation> {
+    pub async fn publish_to_routing_key(&self, op: PublishToRoutingKey) -> AmqpResult<Confirmation> {
         self.channel
-            .basic_publish("", &op.queue_name, op.options, op.payload.to_vec(), op.properties)
+            .basic_publish("", &op.routing_key, op.options, op.payload.contents().to_vec(), op.properties)
             .await?
             .await
     }
@@ -58,12 +58,24 @@ impl AmqpSession {
         Ok(())
     }
 
-    pub async fn create_consumer<D: ConsumerDelegate + 'static>(&self, op: CreateConsumer, message_handler: D) -> AmqpResult<Consumer> {
+    pub async fn create_consumer(&self, op: CreateConsumer) -> AmqpResult<Consumer> {
         let consumer = self
             .channel
             .basic_consume(&op.queue_name, &op.consumer_name, op.options, op.args)
             .await?;
-        consumer.set_delegate(message_handler)?;
+        Ok(consumer)
+    }
+
+    pub async fn create_consumer_with_delegate<D: ConsumerDelegate + 'static>(
+        &self,
+        op: CreateConsumer,
+        delegate: D,
+    ) -> AmqpResult<Consumer> {
+        let consumer = self
+            .channel
+            .basic_consume(&op.queue_name, &op.consumer_name, op.options, op.args)
+            .await?;
+        consumer.set_delegate(delegate)?;
         Ok(consumer)
     }
 
