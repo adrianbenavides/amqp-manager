@@ -9,21 +9,22 @@ helpful methods making it easier to use and less error prone.
 
 ## Usage
 
+CAMBIAR ESTO
+
 ```rust
 use amqp_manager::prelude::*;
 use futures::FutureExt;
 use tokio_amqp::LapinTokioExt;
+use serde::{Deserialize, Serialize};
+#[derive(Deserialize, Serialize)]
+struct SimpleDelivery(String);
 
 #[tokio::main]
 async fn main() {
-    let pool_manager = LapinConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//", &ConnectionProperties::default().with_tokio());
-    let pool = r2d2::Pool::builder()
-        .max_size(2)
-        .build(pool_manager)
-        .expect("Should build amqp connection pool");
+    let pool_manager = RMQConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
+    let pool = mobc::Pool::builder().build(pool_manager);
     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
     let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
-
     let queue_name = "queue-name";
     let create_queue_op = CreateQueue {
         queue_name: queue_name.to_string(),
@@ -34,18 +35,16 @@ async fn main() {
         ..Default::default()
     };
     amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
-
     amqp_session
-        .publish_to_queue(PublishToQueue {
-            queue_name: queue_name.to_string(),
-            payload: Bytes::from_static(b"Hello world!"),
+        .publish_to_routing_key(PublishToRoutingKey {
+            routing_key: queue_name.to_string(),
+            payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
             ..Default::default()
         })
         .await
         .expect("publish_to_queue");
-
     amqp_session
-        .create_consumer(
+        .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: queue_name.to_string(),
                 consumer_name: "consumer-name".to_string(),
@@ -62,7 +61,6 @@ async fn main() {
         )
         .await
         .expect("create_consumer");
-
     let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }

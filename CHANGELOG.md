@@ -3,3 +3,4 @@
 **Features**
 
 * Initial release
+* Support for tokio 0.2

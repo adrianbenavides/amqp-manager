@@ -21,9 +21,9 @@ async fn pub_sub() {
     for _ in 0..messages_to_queue {
         let confirmation = amqp_session
             .clone()
-            .publish_to_queue(PublishToQueue {
-                queue_name: queue_name.to_string(),
-                payload: Bytes::from_static(b"Hello world!"),
+            .publish_to_routing_key(PublishToRoutingKey {
+                routing_key: queue_name.to_string(),
+                payload: utils::dummy_payload(),
                 ..Default::default()
             })
             .await
@@ -35,13 +35,13 @@ async fn pub_sub() {
     assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
 
     amqp_session
-        .create_consumer(
+        .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: queue_name.to_string(),
                 consumer_name: utils::generate_random_name(),
                 ..Default::default()
             },
-            utils::dummy_message_handler,
+            utils::dummy_delegate,
         )
         .await
         .expect("create_consumer");
@@ -96,7 +96,7 @@ async fn broadcast() {
             .clone()
             .publish_to_exchange(PublishToExchange {
                 exchange_name: exchange_name.clone(),
-                payload: Bytes::from_static(b"Hello world!"),
+                payload: utils::dummy_payload(),
                 ..Default::default()
             })
             .await
@@ -111,13 +111,13 @@ async fn broadcast() {
 
     for queue_name in &queue_names {
         amqp_session
-            .create_consumer(
+            .create_consumer_with_delegate(
                 CreateConsumer {
                     queue_name: queue_name.to_string(),
                     consumer_name: utils::generate_random_name(),
                     ..Default::default()
                 },
-                utils::dummy_message_handler,
+                utils::dummy_delegate,
             )
             .await
             .expect("create_consumer");
@@ -134,6 +134,7 @@ mod utils {
     use futures::FutureExt;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use serde::{Deserialize, Serialize};
     use tokio_amqp::LapinTokioExt;
 
     lazy_static::lazy_static! {
@@ -142,19 +143,30 @@ mod utils {
             std::env::var("TEST_AMQP_URL").unwrap_or_else(|_| "amqp://guest:guest@127.0.0.1:5672//".to_string())
         };
         static ref AMQP_MANAGER: AmqpManager = {
-            let manager = LapinConnectionManager::new(&AMQP_URL, &ConnectionProperties::default().with_tokio());
-            let pool = r2d2::Pool::builder().max_size(2).build(manager).expect("Should build amqp connection pool");
+            let manager = RMQConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
+            let pool = mobc::Pool::builder().max_open(2).build(manager);
             AmqpManager::new(pool).expect("Should create AmqpManager instance")
         };
     }
 
     pub(crate) async fn get_amqp_session() -> AmqpSession {
-        AMQP_MANAGER.get_session().await.unwrap()
+        AMQP_MANAGER.get_session_with_confirm_select().await.unwrap()
     }
 
-    pub(crate) async fn dummy_message_handler(delivery: DeliveryResult) {
+    const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";
+
+    #[derive(Deserialize, Serialize)]
+    struct DummyDelivery(String);
+
+    pub fn dummy_payload() -> Payload {
+        Payload::new(&DummyDelivery(DUMMY_DELIVERY_CONTENTS.to_string())).unwrap()
+    }
+
+    pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
             tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
+            let payload: DummyDelivery = AmqpManager::deserialize_json_delivery(&delivery).expect("Should deserialize the delivery");
+            assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
                 .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
                 .map(|_| ())
