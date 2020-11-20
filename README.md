@@ -9,8 +9,6 @@ helpful methods making it easier to use and less error prone.
 
 ## Usage
 
-CAMBIAR ESTO
-
 ```rust
 use amqp_manager::prelude::*;
 use futures::FutureExt;
