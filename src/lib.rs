@@ -84,7 +84,7 @@ pub type AmqpResult<T> = lapin::Result<T>;
 pub type AmqpConsumerResult<T> = std::result::Result<T, AmqpConsumerError>;
 
 /// The error type returned in the `AmqpConsumerResult<T>` struct.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AmqpConsumerError {
     RecoverableError(String),
     UnrecoverableError(String),
