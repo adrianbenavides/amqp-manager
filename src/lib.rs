@@ -113,6 +113,7 @@ impl AmqpConsumerError {
 }
 
 /// The struct that handles the connection pool.
+#[derive(Clone)]
 pub struct AmqpManager {
     conn_pool: mobc::Pool<mobc_lapin::RMQConnectionManager>,
 }
