@@ -144,7 +144,7 @@ mod utils {
         };
         static ref AMQP_MANAGER: AmqpManager = {
             let manager = RMQConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
-            let pool = mobc::Pool::builder().build(manager);
+            let pool = mobc::Pool::builder().max_open(2).build(manager);
             AmqpManager::new(pool).expect("Should create AmqpManager instance")
         };
     }
@@ -164,7 +164,7 @@ mod utils {
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
             let payload: DummyDelivery = AmqpManager::deserialize_json_delivery(&delivery).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
