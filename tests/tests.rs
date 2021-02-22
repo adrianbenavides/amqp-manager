@@ -164,13 +164,14 @@ mod utils {
     struct DummyDelivery(String);
 
     pub fn dummy_payload() -> Payload {
-        Payload::new(&DummyDelivery(DUMMY_DELIVERY_CONTENTS.to_string())).unwrap()
+        Payload::new(&DummyDelivery(DUMMY_DELIVERY_CONTENTS.to_string()), serde_json::to_vec).unwrap()
     }
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
             tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
-            let payload: DummyDelivery = AmqpManager::deserialize_json_delivery(&delivery).expect("Should deserialize the delivery");
+            let payload: DummyDelivery =
+                AmqpManager::deserialize_delivery(&delivery, serde_json::from_slice).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
                 .basic_ack(delivery.delivery_tag, BasicAckOptions::default())

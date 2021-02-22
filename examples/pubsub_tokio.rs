@@ -31,7 +31,7 @@ async fn main() {
     let confirmation = amqp_session
         .publish_to_routing_key(PublishToRoutingKey {
             routing_key: queue.name().as_str(),
-            payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
+            payload: Payload::new(&SimpleDelivery("Hello World".to_string()), serde_json::to_vec).unwrap(),
             ..Default::default()
         })
         .await
@@ -46,7 +46,7 @@ async fn main() {
             },
             move |delivery: DeliveryResult| async {
                 if let Ok(Some((channel, delivery))) = delivery {
-                    let payload: SimpleDelivery = AmqpManager::deserialize_json_delivery(&delivery).unwrap();
+                    let payload: SimpleDelivery = AmqpManager::deserialize_delivery(&delivery, serde_json::from_slice).unwrap();
                     assert_eq!(&payload.0, "Hello World");
                     channel
                         .basic_ack(delivery.delivery_tag, BasicAckOptions::default())

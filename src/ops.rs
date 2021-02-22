@@ -81,11 +81,19 @@ pub struct Payload {
 }
 
 impl Payload {
-    pub fn new<T: serde::Serialize>(contents: &T) -> AmqpResult<Self> {
-        let serialized = serde_json::to_vec(contents).map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-        Ok(Self {
-            contents: Bytes::from(serialized),
-        })
+    pub fn new<T, F, Err>(value: &T, serializer: F) -> AmqpResult<Self>
+    where
+        T: ?Sized + serde::Serialize,
+        F: FnOnce(&T) -> Result<Vec<u8>, Err>,
+        Err: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        match serializer(value) {
+            Ok(x) => Ok(Self { contents: Bytes::from(x) }),
+            Err(err) => {
+                let err = std::io::Error::new(std::io::ErrorKind::InvalidData, err);
+                Err(lapin::Error::from(err))
+            }
+        }
     }
 
     pub fn contents(&self) -> Bytes {

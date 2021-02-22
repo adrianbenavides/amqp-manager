@@ -33,7 +33,7 @@
 //!     amqp_session
 //!         .publish_to_routing_key(PublishToRoutingKey {
 //!             routing_key: &queue_name,
-//!             payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
+//!             payload: Payload::new(&SimpleDelivery("Hello World".to_string()), serde_json::to_vec).unwrap(),
 //!             ..Default::default()
 //!         })
 //!         .await
@@ -174,14 +174,6 @@ impl AmqpManager {
                 Err(AmqpConsumerError::UnrecoverableError(msg))
             }
         }
-    }
-
-    /// Helper method to deserialize the `Delivery` contents into a `T` struct that was previously serialized as a json.
-    pub fn deserialize_json_delivery<'de, T>(delivery: &'de Delivery) -> AmqpConsumerResult<T>
-    where
-        T: serde::de::Deserialize<'de>,
-    {
-        Self::deserialize_delivery(delivery, serde_json::from_slice::<'de, T>)
     }
 }
 
