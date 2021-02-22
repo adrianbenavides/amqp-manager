@@ -14,14 +14,14 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let pool_manager = RMQConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
+//!     let pool_manager = AmqpConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
 //!     let pool = mobc::Pool::builder().build(pool_manager);
 //!     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
 //!     let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
 //!
 //!     let queue_name = "queue-name";
 //!     let create_queue_op = CreateQueue {
-//!         queue_name: queue_name.to_string(),
+//!         queue_name: &queue_name,
 //!         options: QueueDeclareOptions {
 //!             auto_delete: false,
 //!             ..Default::default()
@@ -32,7 +32,7 @@
 //!
 //!     amqp_session
 //!         .publish_to_routing_key(PublishToRoutingKey {
-//!             routing_key: queue_name.to_string(),
+//!             routing_key: &queue_name,
 //!             payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
 //!             ..Default::default()
 //!         })
@@ -42,8 +42,8 @@
 //!     amqp_session
 //!         .create_consumer_with_delegate(
 //!             CreateConsumer {
-//!                 queue_name: queue_name.to_string(),
-//!                 consumer_name: "consumer-name".to_string(),
+//!                 queue_name: &queue_name,
+//!                 consumer_name: "consumer-name",
 //!                 ..Default::default()
 //!             },
 //!             |delivery: DeliveryResult| async {
@@ -70,6 +70,7 @@ use lapin::types::{LongString, ShortString};
 use lapin::{Channel, Connection, ConnectionProperties, ConnectionState, Error as LapinError};
 use mobc::async_trait;
 use mobc::Manager;
+use thiserror::Error;
 
 use crate::prelude::{AMQPValue, FieldTable};
 use crate::session::AmqpSession;
@@ -85,10 +86,13 @@ pub type AmqpResult<T> = lapin::Result<T>;
 pub type AmqpConsumerResult<T> = std::result::Result<T, AmqpConsumerError>;
 
 /// The error type returned in the `AmqpConsumerResult<T>` struct.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
 pub enum AmqpConsumerError {
+    #[error("amqp-consumer recoverable error: `{0}`")]
     RecoverableError(String),
+    #[error("amqp-consumer unrecoverable error: `{0}`")]
     UnrecoverableError(String),
+    #[error("amqp-consumer duplicated event error: `{0}`")]
     DuplicatedEventError(String),
 }
 
@@ -116,11 +120,11 @@ impl AmqpConsumerError {
 /// The struct that handles the connection pool.
 #[derive(Clone)]
 pub struct AmqpManager {
-    conn_pool: mobc::Pool<RMQConnectionManager>,
+    conn_pool: mobc::Pool<AmqpConnectionManager>,
 }
 
 impl AmqpManager {
-    pub fn new(conn_pool: mobc::Pool<RMQConnectionManager>) -> AmqpResult<Self> {
+    pub fn new(conn_pool: mobc::Pool<AmqpConnectionManager>) -> AmqpResult<Self> {
         Ok(Self { conn_pool })
     }
 
@@ -156,9 +160,14 @@ impl AmqpManager {
         args
     }
 
-    /// Helper method to deserialize the `Delivery` contents into a `T` struct that was previously serialized as a json.
-    pub fn deserialize_json_delivery<'de, T: serde::de::Deserialize<'de>>(delivery: &'de Delivery) -> AmqpConsumerResult<T> {
-        match serde_json::from_slice(&delivery.data) {
+    /// Helper method to deserialize the `Delivery` contents into a `T` struct with an arbitrary deserializer.
+    pub fn deserialize_delivery<'de, T, F, Err>(delivery: &'de Delivery, deserializer: F) -> AmqpConsumerResult<T>
+    where
+        T: serde::de::Deserialize<'de>,
+        F: FnOnce(&'de [u8]) -> Result<T, Err>,
+        Err: std::error::Error,
+    {
+        match deserializer(&delivery.data) {
             Ok(x) => Ok(x),
             Err(_) => {
                 let msg = "Failed deserializing delivery data into struct".to_string();
@@ -166,15 +175,23 @@ impl AmqpManager {
             }
         }
     }
+
+    /// Helper method to deserialize the `Delivery` contents into a `T` struct that was previously serialized as a json.
+    pub fn deserialize_json_delivery<'de, T>(delivery: &'de Delivery) -> AmqpConsumerResult<T>
+    where
+        T: serde::de::Deserialize<'de>,
+    {
+        Self::deserialize_delivery(delivery, serde_json::from_slice::<'de, T>)
+    }
 }
 
 #[derive(Clone, Debug)]
-pub struct RMQConnectionManager {
+pub struct AmqpConnectionManager {
     addr: String,
     connection_properties: ConnectionProperties,
 }
 
-impl RMQConnectionManager {
+impl AmqpConnectionManager {
     pub fn new(addr: String, connection_properties: ConnectionProperties) -> Self {
         Self {
             addr,
@@ -184,13 +201,12 @@ impl RMQConnectionManager {
 }
 
 #[async_trait]
-impl Manager for RMQConnectionManager {
+impl Manager for AmqpConnectionManager {
     type Connection = Connection;
     type Error = LapinError;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        let c = Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await?;
-        Ok(c)
+        Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await
     }
 
     async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {

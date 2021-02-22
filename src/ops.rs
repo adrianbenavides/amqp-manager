@@ -10,72 +10,72 @@ use lapin::types::FieldTable;
 use lapin::{BasicProperties, ExchangeKind};
 use std::fmt::Debug;
 
-#[derive(Debug, Default, Clone)]
-pub struct CreateExchange {
-    pub exchange_name: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CreateExchange<'a> {
+    pub exchange_name: &'a str,
     pub kind: ExchangeKind,
     pub options: ExchangeDeclareOptions,
     pub args: FieldTable,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct PublishToExchange {
-    pub exchange_name: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PublishToExchange<'a> {
+    pub exchange_name: &'a str,
     pub options: BasicPublishOptions,
     pub payload: Payload,
     pub properties: BasicProperties,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct DeleteExchanges {
-    pub exchange_names: Vec<String>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeleteExchanges<'a> {
+    pub exchange_names: &'a [&'a str],
     pub options: ExchangeDeleteOptions,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct CreateQueue {
-    pub queue_name: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CreateQueue<'a> {
+    pub queue_name: &'a str,
     pub options: QueueDeclareOptions,
     pub args: FieldTable,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct BindQueueToExchange {
-    pub queue_name: String,
-    pub exchange_name: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BindQueueToExchange<'a> {
+    pub queue_name: &'a str,
+    pub exchange_name: &'a str,
     pub options: QueueBindOptions,
     pub args: FieldTable,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct PublishToRoutingKey {
-    pub routing_key: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PublishToRoutingKey<'a> {
+    pub routing_key: &'a str,
     pub options: BasicPublishOptions,
     pub payload: Payload,
     pub properties: BasicProperties,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct DeleteQueues {
-    pub queue_names: Vec<String>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeleteQueues<'a> {
+    pub queue_names: &'a [&'a str],
     pub options: QueueDeleteOptions,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct CreateConsumer {
-    pub queue_name: String,
-    pub consumer_name: String,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CreateConsumer<'a> {
+    pub queue_name: &'a str,
+    pub consumer_name: &'a str,
     pub options: BasicConsumeOptions,
     pub args: FieldTable,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct CancelConsumers {
-    pub consumers_names: Vec<String>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CancelConsumers<'a> {
+    pub consumers_names: &'a [&'a str],
     pub options: BasicCancelOptions,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Payload {
     contents: Bytes,
 }
