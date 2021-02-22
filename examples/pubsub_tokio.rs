@@ -8,7 +8,7 @@ struct SimpleDelivery(String);
 
 #[tokio::main]
 async fn main() {
-    let pool_manager = RMQConnectionManager::new(
+    let pool_manager = AmqpConnectionManager::new(
         "amqp://admin:admin@192.168.2.169:5672//".to_string(),
         ConnectionProperties::default().with_tokio(),
     );
@@ -30,8 +30,8 @@ async fn main() {
 
     let confirmation = amqp_session
         .publish_to_routing_key(PublishToRoutingKey {
-            routing_key: queue.name().to_string(),
-            payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
+            routing_key: queue.name().as_str(),
+            payload: Payload::new(&SimpleDelivery("Hello World".to_string()), serde_json::to_vec).unwrap(),
             ..Default::default()
         })
         .await
@@ -41,12 +41,12 @@ async fn main() {
     amqp_session
         .create_consumer_with_delegate(
             CreateConsumer {
-                queue_name: queue.name().to_string(),
+                queue_name: queue.name().as_str(),
                 ..Default::default()
             },
             move |delivery: DeliveryResult| async {
                 if let Ok(Some((channel, delivery))) = delivery {
-                    let payload: SimpleDelivery = AmqpManager::deserialize_json_delivery(&delivery).unwrap();
+                    let payload: SimpleDelivery = AmqpManager::deserialize_delivery(&delivery, serde_json::from_slice).unwrap();
                     assert_eq!(&payload.0, "Hello World");
                     channel
                         .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
