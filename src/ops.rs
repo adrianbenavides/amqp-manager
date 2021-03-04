@@ -21,6 +21,7 @@ pub struct CreateExchange<'a> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublishToExchange<'a> {
     pub exchange_name: &'a str,
+    pub routing_key: &'a str,
     pub options: BasicPublishOptions,
     pub payload: Payload,
     pub properties: BasicProperties,
@@ -43,6 +44,7 @@ pub struct CreateQueue<'a> {
 pub struct BindQueueToExchange<'a> {
     pub queue_name: &'a str,
     pub exchange_name: &'a str,
+    pub routing_key: &'a str,
     pub options: QueueBindOptions,
     pub args: FieldTable,
 }
