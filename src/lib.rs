@@ -7,10 +7,6 @@
 //! use amqp_manager::prelude::*;
 //! use futures::FutureExt;
 //! use tokio_amqp::LapinTokioExt;
-//! use serde::{Deserialize, Serialize};
-//!
-//! #[derive(Deserialize, Serialize)]
-//! struct SimpleDelivery(String);
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -33,7 +29,7 @@
 //!     amqp_session
 //!         .publish_to_routing_key(PublishToRoutingKey {
 //!             routing_key: &queue_name,
-//!             payload: Payload::new(&SimpleDelivery("Hello World".to_string()), serde_json::to_vec).unwrap(),
+//!             payload: "Hello World".as_bytes(),
 //!             ..Default::default()
 //!         })
 //!         .await
@@ -48,6 +44,8 @@
 //!             },
 //!             |delivery: DeliveryResult| async {
 //!                 if let Ok(Some((channel, delivery))) = delivery {
+//!                    let payload = std::str::from_utf8(&delivery.data).unwrap();
+//!                     assert_eq!(payload, "Hello World");
 //!                     channel
 //!                         .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
 //!                         .map(|_| ())
@@ -63,14 +61,12 @@
 //! }
 //! ```
 
-use lapin::message::Delivery;
-use lapin::options::{BasicNackOptions, ConfirmSelectOptions};
+use lapin::options::ConfirmSelectOptions;
 use lapin::protocol::{AMQPError, AMQPErrorKind, AMQPHardError};
 use lapin::types::{LongString, ShortString};
 use lapin::{Channel, Connection, ConnectionProperties, ConnectionState, Error as LapinError};
 use mobc::async_trait;
 use mobc::Manager;
-use thiserror::Error;
 
 use crate::prelude::{AMQPValue, FieldTable};
 use crate::session::AmqpSession;
@@ -82,40 +78,6 @@ mod session;
 
 /// A type alias of the lapin's `Result` type.
 pub type AmqpResult<T> = lapin::Result<T>;
-/// A helper `Result` that can come handy to handle the consumer's message handler's errors.
-pub type AmqpConsumerResult<T> = std::result::Result<T, AmqpConsumerError>;
-
-/// The error type returned in the `AmqpConsumerResult<T>` struct.
-#[derive(Clone, Debug, Error)]
-pub enum AmqpConsumerError {
-    #[error("amqp-consumer recoverable error: `{0}`")]
-    RecoverableError(String),
-    #[error("amqp-consumer unrecoverable error: `{0}`")]
-    UnrecoverableError(String),
-    #[error("amqp-consumer duplicated event error: `{0}`")]
-    DuplicatedEventError(String),
-}
-
-impl AmqpConsumerError {
-    /// A helper method that returns a `BasicNackOptions` instance depending on the error type.
-    /// Example: `channel.basic_nack(delivery_tag, error::nack_options()).map(|_| ()).await`.
-    pub fn nack_options(error: &Self) -> BasicNackOptions {
-        match error {
-            Self::RecoverableError(_) => BasicNackOptions {
-                multiple: false,
-                requeue: true,
-            },
-            Self::UnrecoverableError(_) => BasicNackOptions {
-                multiple: false,
-                requeue: false,
-            },
-            Self::DuplicatedEventError(_) => BasicNackOptions {
-                multiple: false,
-                requeue: false,
-            },
-        }
-    }
-}
 
 /// The struct that handles the connection pool.
 #[derive(Clone)]
@@ -158,22 +120,6 @@ impl AmqpManager {
             AMQPValue::LongString(LongString::from(dead_letter_exchange_name)),
         );
         args
-    }
-
-    /// Helper method to deserialize the `Delivery` contents into a `T` struct with an arbitrary deserializer.
-    pub fn deserialize_delivery<'de, T, F, Err>(delivery: &'de Delivery, deserializer: F) -> AmqpConsumerResult<T>
-    where
-        T: serde::de::Deserialize<'de>,
-        F: FnOnce(&'de [u8]) -> Result<T, Err>,
-        Err: std::error::Error,
-    {
-        match deserializer(&delivery.data) {
-            Ok(x) => Ok(x),
-            Err(_) => {
-                let msg = "Failed deserializing delivery data into struct".to_string();
-                Err(AmqpConsumerError::UnrecoverableError(msg))
-            }
-        }
     }
 }
 
