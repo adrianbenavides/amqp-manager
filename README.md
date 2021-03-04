@@ -13,43 +13,50 @@ helpful methods making it easier to use and less error prone.
 use amqp_manager::prelude::*;
 use futures::FutureExt;
 use tokio_amqp::LapinTokioExt;
-use serde::{Deserialize, Serialize};
-#[derive(Deserialize, Serialize)]
-struct SimpleDelivery(String);
 
 #[tokio::main]
 async fn main() {
-    let pool_manager = RMQConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
-    let pool = mobc::Pool::builder().build(pool_manager);
+    let pool_manager = AmqpConnectionManager::new(
+        "amqp://admin:admin@192.168.2.169:5672//".to_string(),
+        ConnectionProperties::default().with_tokio(),
+    );
+    let pool = mobc::Pool::builder().max_open(2).build(pool_manager);
     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
-    let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
-    let queue_name = "queue-name";
+    let tx_session = amqp_manager
+        .get_session_with_confirm_select()
+        .await
+        .expect("Should create AmqpSession instance");
+
     let create_queue_op = CreateQueue {
-        queue_name: queue_name.to_string(),
         options: QueueDeclareOptions {
-            auto_delete: false,
+            auto_delete: true,
             ..Default::default()
         },
         ..Default::default()
     };
-    amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
-    amqp_session
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+
+    let confirmation = tx_session
         .publish_to_routing_key(PublishToRoutingKey {
-            routing_key: queue_name.to_string(),
-            payload: Payload::new(&SimpleDelivery("Hello World".to_string())).unwrap(),
+            routing_key: queue.name().as_str(),
+            payload: "Hello World".as_bytes(),
             ..Default::default()
         })
         .await
         .expect("publish_to_queue");
-    amqp_session
+    assert!(confirmation.is_ack());
+
+    let rx_session = amqp_manager.get_session().await.unwrap();
+    rx_session
         .create_consumer_with_delegate(
             CreateConsumer {
-                queue_name: queue_name.to_string(),
-                consumer_name: "consumer-name".to_string(),
+                queue_name: queue.name().as_str(),
                 ..Default::default()
             },
-            |delivery: DeliveryResult| async {
+            move |delivery: DeliveryResult| async {
                 if let Ok(Some((channel, delivery))) = delivery {
+                    let payload = std::str::from_utf8(&delivery.data).unwrap();
+                    assert_eq!(payload, "Hello World");
                     channel
                         .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
                         .map(|_| ())
@@ -59,7 +66,8 @@ async fn main() {
         )
         .await
         .expect("create_consumer");
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }
 ```
