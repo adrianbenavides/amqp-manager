@@ -10,7 +10,7 @@ async fn main() {
     );
     let pool = mobc::Pool::builder().max_open(2).build(pool_manager);
     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
-    let amqp_session = amqp_manager
+    let tx_session = amqp_manager
         .get_session_with_confirm_select()
         .await
         .expect("Should create AmqpSession instance");
@@ -22,9 +22,9 @@ async fn main() {
         },
         ..Default::default()
     };
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
 
-    let confirmation = amqp_session
+    let confirmation = tx_session
         .publish_to_routing_key(PublishToRoutingKey {
             routing_key: queue.name().as_str(),
             payload: "Hello World".as_bytes(),
@@ -34,7 +34,8 @@ async fn main() {
         .expect("publish_to_queue");
     assert!(confirmation.is_ack());
 
-    amqp_session
+    let rx_session = amqp_manager.get_session().await.unwrap();
+    rx_session
         .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: queue.name().as_str(),
@@ -54,6 +55,6 @@ async fn main() {
         .await
         .expect("create_consumer");
 
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }
