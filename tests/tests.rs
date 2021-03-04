@@ -23,7 +23,7 @@ async fn pub_sub() {
             .clone()
             .publish_to_routing_key(PublishToRoutingKey {
                 routing_key: &queue_name,
-                payload: utils::dummy_payload(),
+                payload: &utils::dummy_payload(),
                 ..Default::default()
             })
             .await
@@ -97,7 +97,7 @@ async fn broadcast() {
             .clone()
             .publish_to_exchange(PublishToExchange {
                 exchange_name: &exchange_name,
-                payload: utils::dummy_payload(),
+                payload: &utils::dummy_payload(),
                 ..Default::default()
             })
             .await
@@ -139,7 +139,6 @@ mod utils {
     use futures::FutureExt;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use serde::{Deserialize, Serialize};
     use tokio_amqp::LapinTokioExt;
 
     lazy_static::lazy_static! {
@@ -160,18 +159,17 @@ mod utils {
 
     const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";
 
-    #[derive(Deserialize, Serialize)]
+    #[derive(serde::Deserialize, serde::Serialize)]
     struct DummyDelivery(String);
 
-    pub fn dummy_payload() -> Payload {
-        Payload::new(&DummyDelivery(DUMMY_DELIVERY_CONTENTS.to_string()), serde_json::to_vec).unwrap()
+    pub fn dummy_payload() -> Vec<u8> {
+        serde_json::to_vec(&DummyDelivery(DUMMY_DELIVERY_CONTENTS.to_string())).unwrap()
     }
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
             tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
-            let payload: DummyDelivery =
-                AmqpManager::deserialize_delivery(&delivery, serde_json::from_slice).expect("Should deserialize the delivery");
+            let payload: DummyDelivery = serde_json::from_slice(&delivery.data).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
                 .basic_ack(delivery.delivery_tag, BasicAckOptions::default())

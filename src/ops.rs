@@ -1,7 +1,5 @@
 //! These are the structs used as arguments to execute the session's operations.
 
-use crate::AmqpResult;
-use bytes::Bytes;
 use lapin::options::{
     BasicCancelOptions, BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions, ExchangeDeleteOptions, QueueBindOptions,
     QueueDeclareOptions, QueueDeleteOptions,
@@ -23,7 +21,7 @@ pub struct PublishToExchange<'a> {
     pub exchange_name: &'a str,
     pub routing_key: &'a str,
     pub options: BasicPublishOptions,
-    pub payload: Payload,
+    pub payload: &'a [u8],
     pub properties: BasicProperties,
 }
 
@@ -53,7 +51,7 @@ pub struct BindQueueToExchange<'a> {
 pub struct PublishToRoutingKey<'a> {
     pub routing_key: &'a str,
     pub options: BasicPublishOptions,
-    pub payload: Payload,
+    pub payload: &'a [u8],
     pub properties: BasicProperties,
 }
 
@@ -75,30 +73,4 @@ pub struct CreateConsumer<'a> {
 pub struct CancelConsumers<'a> {
     pub consumers_names: &'a [&'a str],
     pub options: BasicCancelOptions,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Payload {
-    contents: Bytes,
-}
-
-impl Payload {
-    pub fn new<T, F, Err>(value: &T, serializer: F) -> AmqpResult<Self>
-    where
-        T: ?Sized + serde::Serialize,
-        F: FnOnce(&T) -> Result<Vec<u8>, Err>,
-        Err: Into<Box<dyn std::error::Error + Send + Sync>>,
-    {
-        match serializer(value) {
-            Ok(x) => Ok(Self { contents: Bytes::from(x) }),
-            Err(err) => {
-                let err = std::io::Error::new(std::io::ErrorKind::InvalidData, err);
-                Err(lapin::Error::from(err))
-            }
-        }
-    }
-
-    pub fn contents(&self) -> Bytes {
-        self.contents.clone()
-    }
 }

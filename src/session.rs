@@ -22,13 +22,7 @@ impl AmqpSession {
 
     pub async fn publish_to_exchange(&self, op: PublishToExchange<'_>) -> AmqpResult<Confirmation> {
         self.channel
-            .basic_publish(
-                op.exchange_name,
-                op.routing_key,
-                op.options,
-                op.payload.contents().to_vec(),
-                op.properties,
-            )
+            .basic_publish(op.exchange_name, op.routing_key, op.options, op.payload.to_vec(), op.properties)
             .await?
             .await
     }
@@ -52,7 +46,7 @@ impl AmqpSession {
 
     pub async fn publish_to_routing_key(&self, op: PublishToRoutingKey<'_>) -> AmqpResult<Confirmation> {
         self.channel
-            .basic_publish("", op.routing_key, op.options, op.payload.contents().to_vec(), op.properties)
+            .basic_publish("", op.routing_key, op.options, op.payload.to_vec(), op.properties)
             .await?
             .await
     }

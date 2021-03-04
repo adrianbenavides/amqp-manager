@@ -1,4 +1,3 @@
-pub use bytes::Bytes;
 pub use lapin;
 pub use lapin::message::{BasicReturnMessage, Delivery, DeliveryResult};
 pub use lapin::options::{BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions, QueueDeclareOptions};

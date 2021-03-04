@@ -1,10 +1,6 @@
 use amqp_manager::prelude::*;
 use futures::FutureExt;
-use serde::{Deserialize, Serialize};
 use tokio_amqp::LapinTokioExt;
-
-#[derive(Deserialize, Serialize)]
-struct SimpleDelivery(String);
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +27,7 @@ async fn main() {
     let confirmation = amqp_session
         .publish_to_routing_key(PublishToRoutingKey {
             routing_key: queue.name().as_str(),
-            payload: Payload::new(&SimpleDelivery("Hello World".to_string()), serde_json::to_vec).unwrap(),
+            payload: "Hello World".as_bytes(),
             ..Default::default()
         })
         .await
@@ -46,8 +42,8 @@ async fn main() {
             },
             move |delivery: DeliveryResult| async {
                 if let Ok(Some((channel, delivery))) = delivery {
-                    let payload: SimpleDelivery = AmqpManager::deserialize_delivery(&delivery, serde_json::from_slice).unwrap();
-                    assert_eq!(&payload.0, "Hello World");
+                    let payload = std::str::from_utf8(&delivery.data).unwrap();
+                    assert_eq!(payload, "Hello World");
                     channel
                         .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
                         .map(|_| ())
