@@ -20,7 +20,6 @@ async fn pub_sub() {
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
         let confirmation = amqp_session
-            .clone()
             .publish_to_routing_key(PublishToRoutingKey {
                 routing_key: &queue_name,
                 payload: &utils::dummy_payload(),
@@ -94,7 +93,6 @@ async fn broadcast() {
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
         let confirmation = amqp_session
-            .clone()
             .publish_to_exchange(PublishToExchange {
                 exchange_name: &exchange_name,
                 payload: &utils::dummy_payload(),
