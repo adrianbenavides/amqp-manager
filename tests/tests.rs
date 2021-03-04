@@ -2,7 +2,7 @@ use amqp_manager::prelude::*;
 
 #[tokio::test]
 async fn pub_sub() {
-    let amqp_session = utils::get_amqp_session().await;
+    let tx_session = utils::get_amqp_session().await;
 
     let queue_name = utils::generate_random_name();
     let create_queue_op = CreateQueue {
@@ -13,13 +13,12 @@ async fn pub_sub() {
         },
         ..Default::default()
     };
-
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "No messages to consume");
 
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
-        let confirmation = amqp_session
+        let confirmation = tx_session
             .publish_to_routing_key(PublishToRoutingKey {
                 routing_key: &queue_name,
                 payload: &utils::dummy_payload(),
@@ -30,10 +29,11 @@ async fn pub_sub() {
         assert!(confirmation.is_ack());
     }
 
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
 
-    amqp_session
+    let rx_session = utils::get_amqp_session().await;
+    rx_session
         .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: &queue_name,
@@ -45,16 +45,16 @@ async fn pub_sub() {
         .await
         .expect("create_consumer");
 
-    let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }
 
 #[tokio::test]
 async fn broadcast() {
-    let amqp_session = utils::get_amqp_session().await;
+    let tx_session = utils::get_amqp_session().await;
 
     let exchange_name = utils::generate_random_name();
-    amqp_session
+    tx_session
         .create_exchange(CreateExchange {
             exchange_name: &exchange_name,
             kind: ExchangeKind::Fanout,
@@ -79,8 +79,8 @@ async fn broadcast() {
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        amqp_session.create_queue(create_queue_op).await.expect("create_queue");
-        amqp_session
+        tx_session.create_queue(create_queue_op).await.expect("create_queue");
+        tx_session
             .bind_queue_to_exchange(BindQueueToExchange {
                 queue_name: &queue_name,
                 exchange_name: &exchange_name,
@@ -92,7 +92,7 @@ async fn broadcast() {
 
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
-        let confirmation = amqp_session
+        let confirmation = tx_session
             .publish_to_exchange(PublishToExchange {
                 exchange_name: &exchange_name,
                 payload: &utils::dummy_payload(),
@@ -106,12 +106,13 @@ async fn broadcast() {
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        let queue = amqp_session.create_queue(create_queue_op).await.expect("create_queue");
+        let queue = tx_session.create_queue(create_queue_op).await.expect("create_queue");
         assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
     }
 
+    let rx_session = utils::get_amqp_session().await;
     for queue_name in &queue_names {
-        amqp_session
+        rx_session
             .create_consumer_with_delegate(
                 CreateConsumer {
                     queue_name: &queue_name,
@@ -127,7 +128,7 @@ async fn broadcast() {
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        let queue = amqp_session.create_queue(create_queue_op).await.expect("create_queue");
+        let queue = tx_session.create_queue(create_queue_op).await.expect("create_queue");
         assert_eq!(queue.message_count(), 0, "Messages has been consumed");
     }
 }
@@ -135,21 +136,21 @@ async fn broadcast() {
 mod utils {
     use super::*;
     use futures::FutureExt;
+    use once_cell::sync::Lazy;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use tokio_amqp::LapinTokioExt;
 
-    lazy_static::lazy_static! {
-        static ref AMQP_URL: String = {
-            dotenv::dotenv().ok();
-            std::env::var("TEST_AMQP_URL").unwrap_or_else(|_| "amqp://guest:guest@127.0.0.1:5672//".to_string())
-        };
-        static ref AMQP_MANAGER: AmqpManager = {
-            let manager = AmqpConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
-            let pool = mobc::Pool::builder().max_open(2).build(manager);
-            AmqpManager::new(pool).expect("Should create AmqpManager instance")
-        };
-    }
+    static AMQP_URL: Lazy<String> = Lazy::new(|| {
+        dotenv::dotenv().ok();
+        std::env::var("TEST_AMQP_URL").unwrap_or_else(|_| "amqp://guest:guest@127.0.0.1:5672//".to_string())
+    });
+
+    static AMQP_MANAGER: Lazy<AmqpManager> = Lazy::new(|| {
+        let manager = AmqpConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
+        let pool = mobc::Pool::builder().max_open(2).build(manager);
+        AmqpManager::new(pool).expect("Should create AmqpManager instance")
+    });
 
     pub(crate) async fn get_amqp_session() -> AmqpSession {
         AMQP_MANAGER.get_session_with_confirm_select().await.unwrap()
@@ -166,7 +167,7 @@ mod utils {
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
-            tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             let payload: DummyDelivery = serde_json::from_slice(&delivery.data).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
