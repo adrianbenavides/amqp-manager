@@ -1,6 +1,6 @@
 [package]
 name = "amqp-manager"
-version = "0.6.2"
+version = "1.0.1"
 authors = ["Adrian Benavides"]
 edition = "2018"
 description = "Lapin wrapper that encapsulates the use of connections/channels and provides some helpful methods"
@@ -9,8 +9,8 @@ keywords = ["lapin", "amqp"]
 license = "MIT"
 
 [dependencies]
-lapin = { version = "=1.6", default-features = false, features = ["rustls"] }
-mobc = "=0.5"
+lapin = { version = "=1.7", default-features = false, features = ["rustls"] }
+mobc = "=0.7"
 
 [dev-dependencies]
 dotenv = "0.15"
@@ -19,5 +19,7 @@ once_cell = "1"
 rand = "0.8"
 serde = "1"
 serde_json = "1"
-tokio = { version = "=0.2", features = ["rt-threaded", "macros", "time"] }
-tokio-amqp = { version = "=0.1", default-features = false }
+tracing = "0.1"
+tracing-test = "0.1"
+tokio = { version = "=1", features = ["rt", "macros", "time"] }
+tokio-amqp = { version = "=1", default-features = false }

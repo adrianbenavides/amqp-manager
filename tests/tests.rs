@@ -1,9 +1,16 @@
 use amqp_manager::prelude::*;
+use tracing::{info, span, Level};
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
+#[tracing_test::traced_test]
 async fn pub_sub() {
+    let span = span!(Level::INFO, "pub_sub");
+    let _guard = span.enter();
+
+    info!("Getting amqp tx session");
     let tx_session = utils::get_amqp_session().await;
 
+    info!("Creating queue");
     let queue_name = utils::generate_random_name();
     let create_queue_op = CreateQueue {
         queue_name: &queue_name,
@@ -16,6 +23,7 @@ async fn pub_sub() {
     let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "No messages to consume");
 
+    info!("Publishing messages to queue");
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
         let confirmation = tx_session
@@ -29,10 +37,14 @@ async fn pub_sub() {
         assert!(confirmation.is_ack());
     }
 
+    info!("Getting queue to check message count");
     let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
 
+    info!("Getting amqp rx session");
     let rx_session = utils::get_amqp_session().await;
+
+    info!("Creating consumer");
     rx_session
         .create_consumer_with_delegate(
             CreateConsumer {
@@ -45,15 +57,22 @@ async fn pub_sub() {
         .await
         .expect("create_consumer");
 
+    info!("Getting queue to check message count");
     let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
+#[tracing_test::traced_test]
 async fn broadcast() {
+    let span = span!(Level::INFO, "pub_sub");
+    let _guard = span.enter();
     let tx_session = utils::get_amqp_session().await;
 
+    info!("Getting amqp tx session");
     let exchange_name = utils::generate_random_name();
+
+    info!("Creating exchange");
     tx_session
         .create_exchange(CreateExchange {
             exchange_name: &exchange_name,
@@ -75,6 +94,7 @@ async fn broadcast() {
         ..Default::default()
     };
 
+    info!("Creating queues and binding them to the exchange");
     let queue_names: Vec<String> = (0..5).map(|_| utils::generate_random_name()).collect();
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
@@ -90,6 +110,7 @@ async fn broadcast() {
             .expect("bind_queue_to_exchange");
     }
 
+    info!("Publishing messages to queue");
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
         let confirmation = tx_session
@@ -103,6 +124,7 @@ async fn broadcast() {
         assert!(confirmation.is_ack());
     }
 
+    info!("Getting queues to check message counts");
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
@@ -110,7 +132,10 @@ async fn broadcast() {
         assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
     }
 
+    info!("Getting amqp rx session");
     let rx_session = utils::get_amqp_session().await;
+
+    info!("Creating consumers for each queue");
     for queue_name in &queue_names {
         rx_session
             .create_consumer_with_delegate(
@@ -125,6 +150,7 @@ async fn broadcast() {
             .expect("create_consumer");
     }
 
+    info!("Getting queues to check message counts");
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
@@ -148,7 +174,7 @@ mod utils {
 
     static AMQP_MANAGER: Lazy<AmqpManager> = Lazy::new(|| {
         let manager = AmqpConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
-        let pool = mobc::Pool::builder().max_open(2).build(manager);
+        let pool = mobc::Pool::builder().max_open(0).build(manager);
         AmqpManager::new(pool).expect("Should create AmqpManager instance")
     });
 
@@ -167,7 +193,7 @@ mod utils {
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
-            tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             let payload: DummyDelivery = serde_json::from_slice(&delivery.data).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel

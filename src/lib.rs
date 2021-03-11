@@ -146,8 +146,18 @@ impl Manager for AmqpConnectionManager {
 
     async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
         match conn.status().state() {
-            lapin::ConnectionState::Connected => Ok(conn),
-            other_state => Err(lapin::Error::InvalidConnectionState(other_state)),
+            lapin::ConnectionState::Connected | lapin::ConnectionState::Initial | lapin::ConnectionState::Connecting => Ok(conn),
+            lapin::ConnectionState::Closing => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Closing)),
+            lapin::ConnectionState::Closed => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Closed)),
+            lapin::ConnectionState::Error => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Error)),
+        }
+    }
+
+    #[inline]
+    fn validate(&self, conn: &mut Self::Connection) -> bool {
+        match conn.status().state() {
+            lapin::ConnectionState::Connected | lapin::ConnectionState::Initial | lapin::ConnectionState::Connecting => true,
+            lapin::ConnectionState::Closing | lapin::ConnectionState::Closed | lapin::ConnectionState::Error => false,
         }
     }
 }
