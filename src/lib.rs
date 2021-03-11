@@ -61,14 +61,12 @@
 //! }
 //! ```
 
-use lapin::options::ConfirmSelectOptions;
-use lapin::protocol::{AMQPError, AMQPErrorKind, AMQPHardError};
-use lapin::types::{LongString, ShortString};
-use lapin::{Channel, Connection, ConnectionProperties, ConnectionState, Error as LapinError};
 use mobc::async_trait;
 use mobc::Manager;
 
-use crate::prelude::{AMQPValue, FieldTable};
+use crate::prelude::lapin::options::ConfirmSelectOptions;
+use crate::prelude::lapin::types::{LongString, ShortString};
+use crate::prelude::{AMQPValue, Channel, ConnectionProperties, FieldTable};
 use crate::session::AmqpSession;
 
 pub mod prelude;
@@ -103,12 +101,11 @@ impl AmqpManager {
     }
 
     async fn get_channel(&self) -> AmqpResult<Channel> {
-        let conn = self.conn_pool.get().await.map_err(|e| {
-            lapin::Error::ProtocolError(AMQPError::new(
-                AMQPErrorKind::Hard(AMQPHardError::CONNECTIONFORCED),
-                ShortString::from(e.to_string()),
-            ))
-        })?;
+        let conn = self
+            .conn_pool
+            .get()
+            .await
+            .map_err(|_mobc_err| lapin::Error::InvalidConnectionState(lapin::ConnectionState::Error))?;
         conn.create_channel().await
     }
 
@@ -140,17 +137,17 @@ impl AmqpConnectionManager {
 
 #[async_trait]
 impl Manager for AmqpConnectionManager {
-    type Connection = Connection;
-    type Error = LapinError;
+    type Connection = lapin::Connection;
+    type Error = lapin::Error;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await
+        lapin::Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await
     }
 
     async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
         match conn.status().state() {
-            ConnectionState::Connected => Ok(conn),
-            other_state => Err(LapinError::InvalidConnectionState(other_state)),
+            lapin::ConnectionState::Connected => Ok(conn),
+            other_state => Err(lapin::Error::InvalidConnectionState(other_state)),
         }
     }
 }

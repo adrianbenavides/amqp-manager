@@ -1,6 +1,6 @@
 [package]
 name = "amqp-manager"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Adrian Benavides"]
 edition = "2018"
 description = "Lapin wrapper that encapsulates the use of connections/channels and provides some helpful methods"
