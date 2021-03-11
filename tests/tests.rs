@@ -167,7 +167,7 @@ mod utils {
 
     pub(crate) async fn dummy_delegate(delivery: DeliveryResult) {
         if let Ok(Some((channel, delivery))) = delivery {
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::delay_for(tokio::time::Duration::from_millis(50)).await;
             let payload: DummyDelivery = serde_json::from_slice(&delivery.data).expect("Should deserialize the delivery");
             assert_eq!(&payload.0, DUMMY_DELIVERY_CONTENTS);
             channel
