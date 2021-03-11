@@ -17,7 +17,7 @@ use tokio_amqp::LapinTokioExt;
 #[tokio::main]
 async fn main() {
     let pool_manager = AmqpConnectionManager::new(
-        "amqp://admin:admin@192.168.2.169:5672//".to_string(),
+        "amqp://guest:guest@127.0.0.1:5672//".to_string(),
         ConnectionProperties::default().with_tokio(),
     );
     let pool = mobc::Pool::builder().max_open(2).build(pool_manager);
