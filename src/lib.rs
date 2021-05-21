@@ -10,10 +10,9 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let pool_manager = AmqpConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
-//!     let pool = mobc::Pool::builder().build(pool_manager);
-//!     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
-//!     let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
+//!     let conn = Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio()).await.unwrap();
+//!     let amqp_manager = AmqpManager::default();
+//!     let amqp_session = amqp_manager.get_session(&conn).await.expect("Should create AmqpSession instance");
 //!
 //!     let queue_name = "queue-name";
 //!     let create_queue_op = CreateQueue {
@@ -61,12 +60,9 @@
 //! }
 //! ```
 
-use mobc::async_trait;
-use mobc::Manager;
-
 use crate::prelude::lapin::options::ConfirmSelectOptions;
 use crate::prelude::lapin::types::{LongString, ShortString};
-use crate::prelude::{AMQPValue, Channel, ConnectionProperties, FieldTable};
+use crate::prelude::{AMQPValue, Channel, Connection, FieldTable};
 use crate::session::AmqpSession;
 
 pub mod prelude;
@@ -78,34 +74,23 @@ mod session;
 pub type AmqpResult<T> = lapin::Result<T>;
 
 /// The struct that handles the connection pool.
-#[derive(Clone)]
-pub struct AmqpManager {
-    conn_pool: mobc::Pool<AmqpConnectionManager>,
-}
+#[derive(Clone, Default)]
+pub struct AmqpManager;
 
 impl AmqpManager {
-    pub fn new(conn_pool: mobc::Pool<AmqpConnectionManager>) -> AmqpResult<Self> {
-        Ok(Self { conn_pool })
-    }
-
     /// Gets a new connection from the connection pool and creates a new channel.
     /// Both the connection and the channel will be closed when dropping the `AmqpSession` instance.
-    pub async fn get_session(&self) -> AmqpResult<AmqpSession> {
-        Ok(AmqpSession::new(self.get_channel().await?))
+    pub async fn get_session(&self, conn: &Connection) -> AmqpResult<AmqpSession> {
+        Ok(AmqpSession::new(self.get_channel(conn).await?))
     }
 
-    pub async fn get_session_with_confirm_select(&self) -> AmqpResult<AmqpSession> {
-        let channel = self.get_channel().await?;
+    pub async fn get_session_with_confirm_select(&self, conn: &Connection) -> AmqpResult<AmqpSession> {
+        let channel = self.get_channel(conn).await?;
         channel.confirm_select(ConfirmSelectOptions::default()).await?;
         Ok(AmqpSession::new(channel))
     }
 
-    async fn get_channel(&self) -> AmqpResult<Channel> {
-        let conn = self
-            .conn_pool
-            .get()
-            .await
-            .map_err(|_mobc_err| lapin::Error::InvalidConnectionState(lapin::ConnectionState::Error))?;
+    async fn get_channel(&self, conn: &Connection) -> AmqpResult<Channel> {
         conn.create_channel().await
     }
 
@@ -117,47 +102,5 @@ impl AmqpManager {
             AMQPValue::LongString(LongString::from(dead_letter_exchange_name)),
         );
         args
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct AmqpConnectionManager {
-    addr: String,
-    connection_properties: ConnectionProperties,
-}
-
-impl AmqpConnectionManager {
-    pub fn new(addr: String, connection_properties: ConnectionProperties) -> Self {
-        Self {
-            addr,
-            connection_properties,
-        }
-    }
-}
-
-#[async_trait]
-impl Manager for AmqpConnectionManager {
-    type Connection = lapin::Connection;
-    type Error = lapin::Error;
-
-    async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        lapin::Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await
-    }
-
-    async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
-        match conn.status().state() {
-            lapin::ConnectionState::Connected | lapin::ConnectionState::Initial | lapin::ConnectionState::Connecting => Ok(conn),
-            lapin::ConnectionState::Closing => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Closing)),
-            lapin::ConnectionState::Closed => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Closed)),
-            lapin::ConnectionState::Error => Err(lapin::Error::InvalidConnectionState(lapin::ConnectionState::Error)),
-        }
-    }
-
-    #[inline]
-    fn validate(&self, conn: &mut Self::Connection) -> bool {
-        match conn.status().state() {
-            lapin::ConnectionState::Connected | lapin::ConnectionState::Initial | lapin::ConnectionState::Connecting => true,
-            lapin::ConnectionState::Closing | lapin::ConnectionState::Closed | lapin::ConnectionState::Error => false,
-        }
     }
 }
