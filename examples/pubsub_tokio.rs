@@ -4,14 +4,10 @@ use tokio_amqp::LapinTokioExt;
 
 #[tokio::main]
 async fn main() {
-    let pool_manager = AmqpConnectionManager::new(
-        "amqp://guest:guest@127.0.0.1:5672//".to_string(),
-        ConnectionProperties::default().with_tokio(),
-    );
-    let pool = mobc::Pool::builder().max_open(2).build(pool_manager);
-    let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
-    let tx_session = amqp_manager
-        .get_session_with_confirm_select()
+    let conn = Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio())
+        .await
+        .unwrap();
+    let session = AmqpManager::get_session_with_confirm_select(&conn)
         .await
         .expect("Should create AmqpSession instance");
 
@@ -22,9 +18,9 @@ async fn main() {
         },
         ..Default::default()
     };
-    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
 
-    let confirmation = tx_session
+    let confirmation = session
         .publish_to_routing_key(PublishToRoutingKey {
             routing_key: queue.name().as_str(),
             payload: "Hello World".as_bytes(),
@@ -34,8 +30,7 @@ async fn main() {
         .expect("publish_to_queue");
     assert!(confirmation.is_ack());
 
-    let rx_session = amqp_manager.get_session().await.unwrap();
-    rx_session
+    session
         .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: queue.name().as_str(),
@@ -55,6 +50,6 @@ async fn main() {
         .await
         .expect("create_consumer");
 
-    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }

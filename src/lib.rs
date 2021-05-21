@@ -10,10 +10,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let pool_manager = AmqpConnectionManager::new("amqp://guest:guest@127.0.0.1:5672//".to_string(), ConnectionProperties::default().with_tokio());
-//!     let pool = mobc::Pool::builder().build(pool_manager);
-//!     let amqp_manager = AmqpManager::new(pool).expect("Should create AmqpManager instance");
-//!     let amqp_session = amqp_manager.get_session().await.expect("Should create AmqpSession instance");
+//!     let conn = Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio()).await.unwrap();
+//!     let amqp_session = AmqpManager::get_session(&conn).await.expect("Should create AmqpSession instance");
 //!
 //!     let queue_name = "queue-name";
 //!     let create_queue_op = CreateQueue {
@@ -61,12 +59,9 @@
 //! }
 //! ```
 
-use mobc::async_trait;
-use mobc::Manager;
-
 use crate::prelude::lapin::options::ConfirmSelectOptions;
 use crate::prelude::lapin::types::{LongString, ShortString};
-use crate::prelude::{AMQPValue, Channel, ConnectionProperties, FieldTable};
+use crate::prelude::{AMQPValue, Connection, FieldTable};
 use crate::session::AmqpSession;
 
 pub mod prelude;
@@ -74,39 +69,28 @@ pub mod prelude;
 mod ops;
 mod session;
 
-/// A type alias of the lapin's `Result` type.
+/// Type alias of the lapin's `Result` type.
 pub type AmqpResult<T> = lapin::Result<T>;
 
-/// The struct that handles the connection pool.
-#[derive(Clone)]
-pub struct AmqpManager {
-    conn_pool: mobc::Pool<AmqpConnectionManager>,
-}
+/// Helper struct to create channels.
+#[derive(Clone, Default)]
+pub struct AmqpManager;
 
 impl AmqpManager {
-    pub fn new(conn_pool: mobc::Pool<AmqpConnectionManager>) -> AmqpResult<Self> {
-        Ok(Self { conn_pool })
-    }
-
-    /// Gets a new connection from the connection pool and creates a new channel.
-    /// Both the connection and the channel will be closed when dropping the `AmqpSession` instance.
-    pub async fn get_session(&self) -> AmqpResult<AmqpSession> {
-        Ok(AmqpSession::new(self.get_channel().await?))
-    }
-
-    pub async fn get_session_with_confirm_select(&self) -> AmqpResult<AmqpSession> {
-        let channel = self.get_channel().await?;
-        channel.confirm_select(ConfirmSelectOptions::default()).await?;
+    /// Creates a new channel using the given connection.
+    /// The channel will be closed when dropping the `AmqpSession` instance.
+    /// Creating a new connection is slower than creating a channel, so it's better to reuse the connection and create
+    /// as many channels out of that single connection as needed.
+    pub async fn get_session(conn: &Connection) -> AmqpResult<AmqpSession> {
+        let channel = conn.create_channel().await?;
         Ok(AmqpSession::new(channel))
     }
 
-    async fn get_channel(&self) -> AmqpResult<Channel> {
-        let conn = self
-            .conn_pool
-            .get()
-            .await
-            .map_err(|_mobc_err| lapin::Error::InvalidConnectionState(lapin::ConnectionState::Error))?;
-        conn.create_channel().await
+    /// Creates a new channel using the given connection. This channel can be awaited to receive confirms.
+    pub async fn get_session_with_confirm_select(conn: &Connection) -> AmqpResult<AmqpSession> {
+        let channel = conn.create_channel().await?;
+        channel.confirm_select(ConfirmSelectOptions::default()).await?;
+        Ok(AmqpSession::new(channel))
     }
 
     /// Helper method to create a `FieldTable` instance with the dead-letter argument.
@@ -117,37 +101,5 @@ impl AmqpManager {
             AMQPValue::LongString(LongString::from(dead_letter_exchange_name)),
         );
         args
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct AmqpConnectionManager {
-    addr: String,
-    connection_properties: ConnectionProperties,
-}
-
-impl AmqpConnectionManager {
-    pub fn new(addr: String, connection_properties: ConnectionProperties) -> Self {
-        Self {
-            addr,
-            connection_properties,
-        }
-    }
-}
-
-#[async_trait]
-impl Manager for AmqpConnectionManager {
-    type Connection = lapin::Connection;
-    type Error = lapin::Error;
-
-    async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        lapin::Connection::connect(self.addr.as_str(), self.connection_properties.clone()).await
-    }
-
-    async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
-        match conn.status().state() {
-            lapin::ConnectionState::Connected => Ok(conn),
-            other_state => Err(lapin::Error::InvalidConnectionState(other_state)),
-        }
     }
 }
