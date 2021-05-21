@@ -145,10 +145,10 @@ mod utils {
     });
 
     pub(crate) async fn get_amqp_session() -> AmqpSession {
-        let conn = lapin::Connection::connect(&**AMQP_URL, ConnectionProperties::default().with_tokio())
+        let conn = Connection::connect(&**AMQP_URL, ConnectionProperties::default().with_tokio())
             .await
             .unwrap();
-        AmqpManager::default().get_session_with_confirm_select(&conn).await.unwrap()
+        AmqpManager::get_session_with_confirm_select(&conn).await.unwrap()
     }
 
     const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";

@@ -4,7 +4,7 @@ use lapin::{Channel, Consumer, ConsumerDelegate, Queue};
 use crate::ops::*;
 use crate::AmqpResult;
 
-/// The struct used to manage amqp objects (exchanges, queues, consumers).
+/// Manages amqp objects and its operations (exchanges, queues, consumers).
 /// Since it only contains a `Channel` instance, this struct is also thread-safe.
 #[derive(Debug)]
 pub struct AmqpSession {

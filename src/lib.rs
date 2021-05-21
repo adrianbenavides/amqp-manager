@@ -11,8 +11,7 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let conn = Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio()).await.unwrap();
-//!     let amqp_manager = AmqpManager::default();
-//!     let amqp_session = amqp_manager.get_session(&conn).await.expect("Should create AmqpSession instance");
+//!     let amqp_session = AmqpManager::get_session(&conn).await.expect("Should create AmqpSession instance");
 //!
 //!     let queue_name = "queue-name";
 //!     let create_queue_op = CreateQueue {
@@ -62,7 +61,7 @@
 
 use crate::prelude::lapin::options::ConfirmSelectOptions;
 use crate::prelude::lapin::types::{LongString, ShortString};
-use crate::prelude::{AMQPValue, Channel, Connection, FieldTable};
+use crate::prelude::{AMQPValue, Connection, FieldTable};
 use crate::session::AmqpSession;
 
 pub mod prelude;
@@ -70,28 +69,28 @@ pub mod prelude;
 mod ops;
 mod session;
 
-/// A type alias of the lapin's `Result` type.
+/// Type alias of the lapin's `Result` type.
 pub type AmqpResult<T> = lapin::Result<T>;
 
-/// The struct that handles the connection pool.
+/// Helper struct to create channels.
 #[derive(Clone, Default)]
 pub struct AmqpManager;
 
 impl AmqpManager {
-    /// Gets a new connection from the connection pool and creates a new channel.
-    /// Both the connection and the channel will be closed when dropping the `AmqpSession` instance.
-    pub async fn get_session(&self, conn: &Connection) -> AmqpResult<AmqpSession> {
-        Ok(AmqpSession::new(self.get_channel(conn).await?))
-    }
-
-    pub async fn get_session_with_confirm_select(&self, conn: &Connection) -> AmqpResult<AmqpSession> {
-        let channel = self.get_channel(conn).await?;
-        channel.confirm_select(ConfirmSelectOptions::default()).await?;
+    /// Creates a new channel using the given connection.
+    /// The channel will be closed when dropping the `AmqpSession` instance.
+    /// Creating a new connection is slower than creating a channel, so it's better to reuse the connection and create
+    /// as many channels out of that single connection as needed.
+    pub async fn get_session(conn: &Connection) -> AmqpResult<AmqpSession> {
+        let channel = conn.create_channel().await?;
         Ok(AmqpSession::new(channel))
     }
 
-    async fn get_channel(&self, conn: &Connection) -> AmqpResult<Channel> {
-        conn.create_channel().await
+    /// Creates a new channel using the given connection. This channel can be awaited to receive confirms.
+    pub async fn get_session_with_confirm_select(conn: &Connection) -> AmqpResult<AmqpSession> {
+        let channel = conn.create_channel().await?;
+        channel.confirm_select(ConfirmSelectOptions::default()).await?;
+        Ok(AmqpSession::new(channel))
     }
 
     /// Helper method to create a `FieldTable` instance with the dead-letter argument.

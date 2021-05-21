@@ -16,12 +16,10 @@ use tokio_amqp::LapinTokioExt;
 
 #[tokio::main]
 async fn main() {
-    let conn = lapin::Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio())
+    let conn = Connection::connect("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio())
         .await
         .unwrap();
-    let amqp_manager = AmqpManager::default();
-    let session = amqp_manager
-        .get_session_with_confirm_select(&conn)
+    let session = AmqpManager::get_session_with_confirm_select(&conn)
         .await
         .expect("Should create AmqpSession instance");
 
