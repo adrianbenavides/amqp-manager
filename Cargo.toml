@@ -1,16 +1,15 @@
 [package]
 name = "amqp-manager"
-version = "0.6.2"
+version = "0.7.0"
 authors = ["Adrian Benavides"]
 edition = "2018"
-description = "Lapin wrapper that encapsulates the use of connections/channels and provides some helpful methods"
+description = "Lapin wrapper that encapsulates the use of channels and provides some helpful methods"
 repository = "https://github.com/adrianbenavides/amqp-manager"
 keywords = ["lapin", "amqp"]
 license = "MIT"
 
 [dependencies]
-lapin = { version = "=1.6", default-features = false, features = ["rustls"] }
-mobc = "=0.5"
+lapin = { version = "=1.7", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 dotenv = "0.15"
