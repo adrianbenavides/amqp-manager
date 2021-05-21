@@ -1,16 +1,9 @@
 use amqp_manager::prelude::*;
-use tracing::{info, span, Level};
 
-#[tokio::test(flavor = "multi_thread")]
-#[tracing_test::traced_test]
+#[tokio::test]
 async fn pub_sub() {
-    let span = span!(Level::INFO, "pub_sub");
-    let _guard = span.enter();
+    let session = utils::get_amqp_session().await;
 
-    info!("Getting amqp tx session");
-    let tx_session = utils::get_amqp_session().await;
-
-    info!("Creating queue");
     let queue_name = utils::generate_random_name();
     let create_queue_op = CreateQueue {
         queue_name: &queue_name,
@@ -20,13 +13,12 @@ async fn pub_sub() {
         },
         ..Default::default()
     };
-    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "No messages to consume");
 
-    info!("Publishing messages to queue");
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
-        let confirmation = tx_session
+        let confirmation = session
             .publish_to_routing_key(PublishToRoutingKey {
                 routing_key: &queue_name,
                 payload: &utils::dummy_payload(),
@@ -37,15 +29,10 @@ async fn pub_sub() {
         assert!(confirmation.is_ack());
     }
 
-    info!("Getting queue to check message count");
-    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
 
-    info!("Getting amqp rx session");
-    let rx_session = utils::get_amqp_session().await;
-
-    info!("Creating consumer");
-    rx_session
+    session
         .create_consumer_with_delegate(
             CreateConsumer {
                 queue_name: &queue_name,
@@ -57,23 +44,16 @@ async fn pub_sub() {
         .await
         .expect("create_consumer");
 
-    info!("Getting queue to check message count");
-    let queue = tx_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[tracing_test::traced_test]
+#[tokio::test]
 async fn broadcast() {
-    let span = span!(Level::INFO, "pub_sub");
-    let _guard = span.enter();
-    let tx_session = utils::get_amqp_session().await;
-
-    info!("Getting amqp tx session");
+    let session = utils::get_amqp_session().await;
     let exchange_name = utils::generate_random_name();
 
-    info!("Creating exchange");
-    tx_session
+    session
         .create_exchange(CreateExchange {
             exchange_name: &exchange_name,
             kind: ExchangeKind::Fanout,
@@ -94,13 +74,12 @@ async fn broadcast() {
         ..Default::default()
     };
 
-    info!("Creating queues and binding them to the exchange");
     let queue_names: Vec<String> = (0..5).map(|_| utils::generate_random_name()).collect();
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        tx_session.create_queue(create_queue_op).await.expect("create_queue");
-        tx_session
+        session.create_queue(create_queue_op).await.expect("create_queue");
+        session
             .bind_queue_to_exchange(BindQueueToExchange {
                 queue_name: &queue_name,
                 exchange_name: &exchange_name,
@@ -110,10 +89,9 @@ async fn broadcast() {
             .expect("bind_queue_to_exchange");
     }
 
-    info!("Publishing messages to queue");
     let messages_to_queue = 100_u32;
     for _ in 0..messages_to_queue {
-        let confirmation = tx_session
+        let confirmation = session
             .publish_to_exchange(PublishToExchange {
                 exchange_name: &exchange_name,
                 payload: &utils::dummy_payload(),
@@ -124,20 +102,15 @@ async fn broadcast() {
         assert!(confirmation.is_ack());
     }
 
-    info!("Getting queues to check message counts");
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        let queue = tx_session.create_queue(create_queue_op).await.expect("create_queue");
+        let queue = session.create_queue(create_queue_op).await.expect("create_queue");
         assert_eq!(queue.message_count(), messages_to_queue, "There are messages ready to be consumed");
     }
 
-    info!("Getting amqp rx session");
-    let rx_session = utils::get_amqp_session().await;
-
-    info!("Creating consumers for each queue");
     for queue_name in &queue_names {
-        rx_session
+        session
             .create_consumer_with_delegate(
                 CreateConsumer {
                     queue_name: &queue_name,
@@ -150,11 +123,10 @@ async fn broadcast() {
             .expect("create_consumer");
     }
 
-    info!("Getting queues to check message counts");
     for queue_name in &queue_names {
         let mut create_queue_op = create_queue_op.clone();
         create_queue_op.queue_name = queue_name;
-        let queue = tx_session.create_queue(create_queue_op).await.expect("create_queue");
+        let queue = session.create_queue(create_queue_op).await.expect("create_queue");
         assert_eq!(queue.message_count(), 0, "Messages has been consumed");
     }
 }
@@ -172,14 +144,11 @@ mod utils {
         std::env::var("TEST_AMQP_URL").unwrap_or_else(|_| "amqp://guest:guest@127.0.0.1:5672//".to_string())
     });
 
-    static AMQP_MANAGER: Lazy<AmqpManager> = Lazy::new(|| {
-        let manager = AmqpConnectionManager::new(AMQP_URL.clone(), ConnectionProperties::default().with_tokio());
-        let pool = mobc::Pool::builder().max_open(0).build(manager);
-        AmqpManager::new(pool).expect("Should create AmqpManager instance")
-    });
-
     pub(crate) async fn get_amqp_session() -> AmqpSession {
-        AMQP_MANAGER.get_session_with_confirm_select().await.unwrap()
+        let conn = lapin::Connection::connect(&**AMQP_URL, ConnectionProperties::default().with_tokio())
+            .await
+            .unwrap();
+        AmqpManager::default().get_session_with_confirm_select(&conn).await.unwrap()
     }
 
     const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";
