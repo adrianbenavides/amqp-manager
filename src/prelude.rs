@@ -5,7 +5,7 @@ pub use lapin::options::{
     QueueDeclareOptions,
 };
 pub use lapin::types::{AMQPValue, FieldTable, LongString, ShortString};
-pub use lapin::{BasicProperties, Channel, Connection, ConnectionProperties, Consumer, Error, ExchangeKind, Queue};
+pub use lapin::{BasicProperties, Channel, ConnectionProperties, Consumer, Error, ExchangeKind, Queue};
 
 pub use crate::ops::*;
 pub use crate::session::AmqpSession;
