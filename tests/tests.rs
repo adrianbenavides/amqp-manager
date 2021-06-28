@@ -3,7 +3,6 @@ use amqp_manager::prelude::*;
 #[tokio::test]
 async fn pub_sub() {
     let session = utils::get_amqp_session().await;
-
     let queue_name = utils::generate_random_name();
     let create_queue_op = CreateQueue {
         queue_name: &queue_name,
@@ -145,10 +144,9 @@ mod utils {
     });
 
     pub(crate) async fn get_amqp_session() -> AmqpSession {
-        let conn = Connection::connect(&**AMQP_URL, ConnectionProperties::default().with_tokio())
-            .await
-            .unwrap();
-        AmqpManager::get_session_with_confirm_select(&conn).await.unwrap()
+        let manager = AmqpManager::new(&**AMQP_URL, ConnectionProperties::default().with_tokio());
+        let conn = manager.connect().await.unwrap();
+        AmqpManager::create_session_with_confirm_select(&conn).await.unwrap()
     }
 
     const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";

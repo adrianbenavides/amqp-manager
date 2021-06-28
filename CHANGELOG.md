@@ -1,3 +1,9 @@
+## 1.2.0 (2021-05-21)
+
+**Features**
+
+* Refactor `AmqpManager` to add the necessary fields to create connections more easily
+
 ## 1.1.0 (2021-05-21)
 
 **Features**
