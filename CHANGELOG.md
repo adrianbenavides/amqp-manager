@@ -1,3 +1,9 @@
+## 1.2.1 (2021-10-21)
+
+**Features**
+
+* Make AmqpSession Clonnable
+
 ## 1.2.0 (2021-05-21)
 
 **Features**
