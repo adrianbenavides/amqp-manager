@@ -6,7 +6,7 @@ use crate::AmqpResult;
 
 /// Manages amqp objects and its operations (exchanges, queues, consumers).
 /// Since it only contains a `Channel` instance, this struct is also thread-safe.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AmqpSession {
     channel: Channel,
 }
