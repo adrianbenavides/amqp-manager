@@ -1,12 +1,18 @@
 use amqp_manager::prelude::*;
+use deadpool_lapin::{Config, Runtime};
 use futures::FutureExt;
-use tokio_amqp::LapinTokioExt;
 
 #[tokio::main]
 async fn main() {
-    let manager = AmqpManager::new("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio());
-    let conn = manager.connect().await.unwrap();
-    let session = AmqpManager::create_session_with_confirm_select(&conn)
+    let pool = Config {
+        url: Some("amqp://guest:guest@127.0.0.1:5672//".to_string()),
+        ..Default::default()
+    }
+    .create_pool(Some(Runtime::Tokio1))
+    .expect("Should create DeadPool instance");
+    let manager = AmqpManager::new(pool);
+    let session = manager
+        .create_session_with_confirm_select()
         .await
         .expect("Should create AmqpSession instance");
 

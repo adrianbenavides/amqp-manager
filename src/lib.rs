@@ -5,14 +5,22 @@
 //! Here is an example using the tokio runtime:
 //! ```no_run
 //! use amqp_manager::prelude::*;
+//! use deadpool_lapin::{Config, Runtime};
 //! use futures::FutureExt;
-//! use tokio_amqp::LapinTokioExt;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let manager = AmqpManager::new("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio());
-//!     let conn = manager.connect().await.unwrap();
-//!     let amqp_session = AmqpManager::create_session(&conn).await.expect("Should create AmqpSession instance");
+//!     let pool = Config {
+//!        url: Some("amqp://guest:guest@127.0.0.1:5672//".to_string()),
+//!         ..Default::default()
+//!     }
+//!     .create_pool(Some(Runtime::Tokio1))
+//!     .expect("Should create DeadPool instance");
+//!     let manager = AmqpManager::new(pool);
+//!     let session = manager
+//!         .create_session_with_confirm_select()
+//!         .await
+//!         .expect("Should create AmqpSession instance");
 //!
 //!     let queue_name = "queue-name";
 //!     let create_queue_op = CreateQueue {
@@ -23,9 +31,9 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+//!     session.create_queue(create_queue_op.clone()).await.expect("create_queue");
 //!
-//!     amqp_session
+//!     session
 //!         .publish_to_routing_key(PublishToRoutingKey {
 //!             routing_key: &queue_name,
 //!             payload: "Hello World".as_bytes(),
@@ -34,7 +42,7 @@
 //!         .await
 //!         .expect("publish_to_queue");
 //!
-//!     amqp_session
+//!     session
 //!         .create_consumer_with_delegate(
 //!             CreateConsumer {
 //!                 queue_name: &queue_name,
@@ -55,14 +63,16 @@
 //!         .await
 //!         .expect("create_consumer");
 //!
-//!     let queue = amqp_session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+//!     let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
 //!     assert_eq!(queue.message_count(), 0, "Messages has been consumed");
 //! }
 //! ```
 
+use thiserror::Error;
+
 use crate::prelude::lapin::options::ConfirmSelectOptions;
 use crate::prelude::lapin::types::{LongString, ShortString};
-use crate::prelude::{lapin::Connection, AMQPValue, ConnectionProperties, FieldTable};
+use crate::prelude::{AMQPValue, FieldTable};
 use crate::session::AmqpSession;
 
 pub mod prelude;
@@ -70,40 +80,43 @@ pub mod prelude;
 mod ops;
 mod session;
 
-/// Type alias of the lapin's `Result` type.
-pub type AmqpResult<T> = lapin::Result<T>;
+pub type AmqpResult<T> = Result<T, AmqpError>;
 
-/// Helper struct to create channels.
-#[derive(Clone, Default)]
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum AmqpError {
+    #[error(transparent)]
+    Lapin(#[from] lapin::Error),
+    #[error(transparent)]
+    Pool(#[from] deadpool_lapin::PoolError),
+}
+
+/// This struct contains a connection pool. Since a connection can be used to create multiple channels,
+/// it's recommended to use a pool with a low number of connections.
+/// Refer to the [RabbitMQ channels docs](https://www.rabbitmq.com/channels.html#basics) for more information.
+#[derive(Debug, Clone)]
 pub struct AmqpManager {
-    uri: String,
-    conn_options: ConnectionProperties,
+    pool: deadpool_lapin::Pool,
 }
 
 impl AmqpManager {
-    pub fn new(uri: &str, conn_options: ConnectionProperties) -> Self {
-        Self {
-            uri: uri.to_string(),
-            conn_options,
-        }
+    pub fn new(pool: deadpool_lapin::Pool) -> Self {
+        Self { pool }
     }
 
-    /// Creates a new connection using the internal properties.
-    pub async fn connect(&self) -> AmqpResult<Connection> {
-        Ok(Connection::connect(&self.uri, self.conn_options.clone()).await?)
-    }
-
-    /// Creates a new channel using the given connection.
+    /// Creates a new channel using a connection from the pool.
     /// The channel will be closed when dropping the `AmqpSession` instance.
-    /// Creating a new connection is slower than creating a channel, so it's better to reuse the connection and create
-    /// as many channels out of that single connection as needed.
-    pub async fn create_session(conn: &Connection) -> AmqpResult<AmqpSession> {
+    /// Creating a new connection is slower than creating a channel, so it's better
+    /// to reuse the connection and create as many channels as needed out of that a connection.
+    pub async fn create_session(&self) -> AmqpResult<AmqpSession> {
+        let conn = self.pool.get().await?;
         let channel = conn.create_channel().await?;
         Ok(AmqpSession::new(channel))
     }
 
-    /// Creates a new channel using the given connection. This channel can be awaited to receive confirms.
-    pub async fn create_session_with_confirm_select(conn: &Connection) -> AmqpResult<AmqpSession> {
+    /// Creates a new channel using a connection from the pool. This channel can be awaited to receive confirms.
+    pub async fn create_session_with_confirm_select(&self) -> AmqpResult<AmqpSession> {
+        let conn = self.pool.get().await?;
         let channel = conn.create_channel().await?;
         channel.confirm_select(ConfirmSelectOptions::default()).await?;
         Ok(AmqpSession::new(channel))

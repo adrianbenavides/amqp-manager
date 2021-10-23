@@ -4,21 +4,26 @@
 [![audit](https://github.com/adrianbenavides/amqp-manager/workflows/Audit/badge.svg)](https://github.com/adrianbenavides/amqp-manager/actions)
 [![crates.io-license](https://img.shields.io/crates/l/amqp-manager)](LICENSE)
 
-[Lapin](https://github.com/CleverCloud/lapin) wrapper that encapsulates the use of connections/channels and provides some 
-helpful methods making it easier to use and less error prone. 
+[Lapin](https://github.com/CleverCloud/lapin) wrapper that encapsulates the use of connections/channels and creation of amqp objects.
 
 ## Usage
 
 ```rust
 use amqp_manager::prelude::*;
+use deadpool_lapin::{Config, Runtime};
 use futures::FutureExt;
-use tokio_amqp::LapinTokioExt;
 
 #[tokio::main]
 async fn main() {
-    let manager = AmqpManager::new("amqp://guest:guest@127.0.0.1:5672//", ConnectionProperties::default().with_tokio());
-    let conn = manager.connect().await.unwrap();
-    let session = AmqpManager::create_session_with_confirm_select(&conn)
+    let pool = Config {
+        url: Some("amqp://guest:guest@127.0.0.1:5672//".to_string()),
+        ..Default::default()
+    }
+        .create_pool(Some(Runtime::Tokio1))
+        .expect("Should create DeadPool instance");
+    let manager = AmqpManager::new(pool);
+    let session = manager
+        .create_session_with_confirm_select()
         .await
         .expect("Should create AmqpSession instance");
 
@@ -68,6 +73,4 @@ async fn main() {
 
 ## Build-time Requirements
 
-The crate is tested on `ubuntu-latest` against the following rust versions: nightly, beta, stable and 1.45.0.
-It is possible that it works with older versions as well but this is not tested.
-Please see the details of the lapin crate about its requirements.
+Please see the details of the lapin and deadpool crates about their requirements.
