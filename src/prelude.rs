@@ -1,3 +1,4 @@
+pub use deadpool_lapin;
 pub use lapin;
 pub use lapin::message::{BasicReturnMessage, Delivery, DeliveryResult};
 pub use lapin::options::{

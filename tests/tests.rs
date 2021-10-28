@@ -1,4 +1,5 @@
 use amqp_manager::prelude::*;
+use deadpool_lapin::{Config, Runtime};
 
 #[tokio::test]
 async fn pub_sub() {
@@ -50,11 +51,11 @@ async fn pub_sub() {
 #[tokio::test]
 async fn broadcast() {
     let session = utils::get_amqp_session().await;
-    let exchange_name = utils::generate_random_name();
+    let exchange_name = &utils::generate_random_name();
 
     session
         .create_exchange(CreateExchange {
-            exchange_name: &exchange_name,
+            exchange_name,
             kind: ExchangeKind::Fanout,
             options: ExchangeDeclareOptions {
                 auto_delete: true,
@@ -80,8 +81,8 @@ async fn broadcast() {
         session.create_queue(create_queue_op).await.expect("create_queue");
         session
             .bind_queue_to_exchange(BindQueueToExchange {
-                queue_name: &queue_name,
-                exchange_name: &exchange_name,
+                queue_name,
+                exchange_name,
                 ..Default::default()
             })
             .await
@@ -92,7 +93,7 @@ async fn broadcast() {
     for _ in 0..messages_to_queue {
         let confirmation = session
             .publish_to_exchange(PublishToExchange {
-                exchange_name: &exchange_name,
+                exchange_name,
                 payload: &utils::dummy_payload(),
                 ..Default::default()
             })
@@ -112,7 +113,7 @@ async fn broadcast() {
         session
             .create_consumer_with_delegate(
                 CreateConsumer {
-                    queue_name: &queue_name,
+                    queue_name,
                     consumer_name: &utils::generate_random_name(),
                     ..Default::default()
                 },
@@ -130,23 +131,125 @@ async fn broadcast() {
     }
 }
 
+#[tokio::test]
+async fn reuse_connection_for_multiple_sessions() {
+    let pool = Config {
+        url: Some(utils::AMQP_URL.clone()),
+        ..Default::default()
+    }
+    .create_pool(Some(Runtime::Tokio1))
+    .expect("Failed to create pool");
+    let manager = AmqpManager::new(pool);
+    let session = manager.create_session().await.expect("create_session");
+    let queue_name = utils::generate_random_name();
+    let create_queue_op = CreateQueue {
+        queue_name: &queue_name,
+        options: QueueDeclareOptions {
+            auto_delete: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    assert_eq!(queue.message_count(), 0, "No messages to consume");
+
+    let mut handles = Vec::with_capacity(10);
+    for _session_idx in 0..10 {
+        let queue_name = queue_name.clone();
+        let manager = manager.clone();
+        handles.push(tokio::spawn(async move {
+            let session = manager.create_session().await.expect("create_session");
+            for _msg_idx in 0..10 {
+                session
+                    .publish_to_routing_key(PublishToRoutingKey {
+                        routing_key: &queue_name,
+                        payload: &utils::dummy_payload(),
+                        ..Default::default()
+                    })
+                    .await
+                    .expect("publish_to_queue");
+            }
+        }));
+    }
+    futures::future::try_join_all(handles)
+        .await
+        .expect("Failed awaiting session future");
+}
+
+#[tokio::test]
+async fn multiple_connections_with_multiple_sessions() {
+    let pool = Config {
+        url: Some(utils::AMQP_URL.clone()),
+        ..Default::default()
+    }
+    .create_pool(Some(Runtime::Tokio1))
+    .expect("Failed to create pool");
+    let manager = AmqpManager::new(pool);
+
+    let session = manager.create_session().await.expect("create_session");
+    let queue_name = utils::generate_random_name();
+    let create_queue_op = CreateQueue {
+        queue_name: &queue_name,
+        options: QueueDeclareOptions {
+            auto_delete: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let queue = session.create_queue(create_queue_op.clone()).await.expect("create_queue");
+    assert_eq!(queue.message_count(), 0, "No messages to consume");
+
+    let max_conns = deadpool_lapin::PoolConfig::default().max_size;
+    let mut handles = Vec::with_capacity(10 * max_conns);
+    for _conn_idx in 0..max_conns {
+        for _session_idx in 0..10 {
+            let queue_name = queue_name.clone();
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                let session = manager.create_session().await.expect("create_session");
+                for _msg_idx in 0..10 {
+                    session
+                        .publish_to_routing_key(PublishToRoutingKey {
+                            routing_key: &queue_name,
+                            payload: &utils::dummy_payload(),
+                            ..Default::default()
+                        })
+                        .await
+                        .expect("publish_to_queue");
+                }
+            }));
+        }
+    }
+    futures::future::try_join_all(handles)
+        .await
+        .expect("Failed awaiting session future");
+}
+
 mod utils {
-    use super::*;
     use futures::FutureExt;
     use once_cell::sync::Lazy;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use tokio_amqp::LapinTokioExt;
 
-    static AMQP_URL: Lazy<String> = Lazy::new(|| {
+    use super::*;
+
+    pub(crate) static AMQP_URL: Lazy<String> = Lazy::new(|| {
         dotenv::dotenv().ok();
         std::env::var("TEST_AMQP_URL").unwrap_or_else(|_| "amqp://guest:guest@127.0.0.1:5672//".to_string())
     });
 
     pub(crate) async fn get_amqp_session() -> AmqpSession {
-        let manager = AmqpManager::new(&**AMQP_URL, ConnectionProperties::default().with_tokio());
-        let conn = manager.connect().await.unwrap();
-        AmqpManager::create_session_with_confirm_select(&conn).await.unwrap()
+        let pool = Config {
+            url: Some(AMQP_URL.clone()),
+            ..Default::default()
+        }
+        .create_pool(Some(Runtime::Tokio1))
+        .expect("Failed to create pool");
+        let manager = AmqpManager::new(pool);
+        manager
+            .create_session_with_confirm_select()
+            .await
+            .expect("Failed to create session")
     }
 
     const DUMMY_DELIVERY_CONTENTS: &str = "Hello world!";

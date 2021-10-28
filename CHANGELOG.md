@@ -1,3 +1,15 @@
+## 1.3.0 (2021-10-23)
+
+**Features**
+
+* Add `deadpool` pool connection, which somehow reverts the changes from version `1.1.0`.  
+* Refactor the `AmqpResult` type to include errors from both `lapin` and `deadpool`.
+
+**Breaking**
+
+* Including an async pool connection implies using an async runtime, so as of this release, this library will include
+a couple of features to specify the runtime you want to use (tokio or async_std).
+
 ## 1.2.0 (2021-05-21)
 
 **Features**

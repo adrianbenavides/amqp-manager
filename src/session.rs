@@ -6,6 +6,13 @@ use crate::AmqpResult;
 
 /// Manages amqp objects and its operations (exchanges, queues, consumers).
 /// Since it only contains a `Channel` instance, this struct is also thread-safe.
+///
+/// Note that this struct doesn't implement `Clone`. This is done to encourage the user
+/// to clone an instance of `AmqpManager` and create different sessions on different threads.
+/// Otherwise, if the user shares an AmqpSession between threads and its channel is closed,
+/// they won't be able to create a new one.
+///
+/// Refer to the [RabbitMQ channels docs](https://www.rabbitmq.com/channels.html#basics) for more information.
 #[derive(Debug)]
 pub struct AmqpSession {
     channel: Channel,
@@ -17,14 +24,18 @@ impl AmqpSession {
     }
 
     pub async fn create_exchange(&self, op: CreateExchange<'_>) -> AmqpResult<()> {
-        self.channel.exchange_declare(op.exchange_name, op.kind, op.options, op.args).await
+        Ok(self
+            .channel
+            .exchange_declare(op.exchange_name, op.kind, op.options, op.args)
+            .await?)
     }
 
     pub async fn publish_to_exchange(&self, op: PublishToExchange<'_>) -> AmqpResult<Confirmation> {
-        self.channel
+        Ok(self
+            .channel
             .basic_publish(op.exchange_name, op.routing_key, op.options, op.payload.to_vec(), op.properties)
             .await?
-            .await
+            .await?)
     }
 
     pub async fn delete_exchanges(&self, op: DeleteExchanges<'_>) -> AmqpResult<()> {
@@ -35,20 +46,22 @@ impl AmqpSession {
     }
 
     pub async fn create_queue(&self, op: CreateQueue<'_>) -> AmqpResult<Queue> {
-        self.channel.queue_declare(op.queue_name, op.options, op.args).await
+        Ok(self.channel.queue_declare(op.queue_name, op.options, op.args).await?)
     }
 
     pub async fn bind_queue_to_exchange(&self, op: BindQueueToExchange<'_>) -> AmqpResult<()> {
-        self.channel
-            .queue_bind(op.queue_name, op.exchange_name, op.routing_key, op.options, op.args.clone())
-            .await
+        Ok(self
+            .channel
+            .queue_bind(op.queue_name, op.exchange_name, op.routing_key, op.options, op.args)
+            .await?)
     }
 
     pub async fn publish_to_routing_key(&self, op: PublishToRoutingKey<'_>) -> AmqpResult<Confirmation> {
-        self.channel
+        Ok(self
+            .channel
             .basic_publish("", op.routing_key, op.options, op.payload.to_vec(), op.properties)
             .await?
-            .await
+            .await?)
     }
 
     pub async fn delete_queues(&self, op: DeleteQueues<'_>) -> AmqpResult<()> {
@@ -59,11 +72,10 @@ impl AmqpSession {
     }
 
     pub async fn create_consumer(&self, op: CreateConsumer<'_>) -> AmqpResult<Consumer> {
-        let consumer = self
+        Ok(self
             .channel
             .basic_consume(op.queue_name, op.consumer_name, op.options, op.args)
-            .await?;
-        Ok(consumer)
+            .await?)
     }
 
     pub async fn create_consumer_with_delegate<D: ConsumerDelegate + 'static>(

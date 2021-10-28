@@ -10,8 +10,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        rust: [nightly, stable, 1.45.0]
+        os: [ ubuntu-latest ]
+        rust: [ nightly, stable ]
     steps:
       - uses: actions/checkout@v2
 
